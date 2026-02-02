@@ -2,41 +2,189 @@ import { Redis } from '@upstash/redis';
 
 let redisInstance: Redis | null = null;
 
-export function getRedis(): Redis {
+// Check if Redis is configured
+export function isRedisConfigured(): boolean {
+  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+export function getRedis(): Redis | null {
+  if (!isRedisConfigured()) {
+    return null;
+  }
+  
   if (!redisInstance) {
-    const url = process.env.KV_REST_API_URL;
-    const token = process.env.KV_REST_API_TOKEN;
-    
-    if (!url || !token) {
-      throw new Error('Missing Upstash Redis configuration. Please set KV_REST_API_URL and KV_REST_API_TOKEN environment variables.');
-    }
-    
-    redisInstance = new Redis({ url, token });
+    redisInstance = new Redis({
+      url: process.env.KV_REST_API_URL!,
+      token: process.env.KV_REST_API_TOKEN!,
+    });
   }
   return redisInstance;
 }
 
-// Legacy export for backwards compatibility - use getRedis() instead
-export const redis = {
-  get get() { return getRedis().get.bind(getRedis()); },
-  get set() { return getRedis().set.bind(getRedis()); },
-  get del() { return getRedis().del.bind(getRedis()); },
-  get hget() { return getRedis().hget.bind(getRedis()); },
-  get hset() { return getRedis().hset.bind(getRedis()); },
-  get hgetall() { return getRedis().hgetall.bind(getRedis()); },
-  get lpush() { return getRedis().lpush.bind(getRedis()); },
-  get lrange() { return getRedis().lrange.bind(getRedis()); },
-  get ltrim() { return getRedis().ltrim.bind(getRedis()); },
-  get zadd() { return getRedis().zadd.bind(getRedis()); },
-  get zrange() { return getRedis().zrange.bind(getRedis()); },
-  get zrevrange() { return getRedis().zrevrange.bind(getRedis()); },
-  get expire() { return getRedis().expire.bind(getRedis()); },
-  get sadd() { return getRedis().sadd.bind(getRedis()); },
-  get smembers() { return getRedis().smembers.bind(getRedis()); },
-  get sismember() { return getRedis().sismember.bind(getRedis()); },
-  get incr() { return getRedis().incr.bind(getRedis()); },
-  get incrby() { return getRedis().incrby.bind(getRedis()); },
-  get incrbyfloat() { return getRedis().incrbyfloat.bind(getRedis()); },
+// In-memory fallback store for when Redis is not configured
+const memoryStore = new Map<string, { value: unknown; expires?: number }>();
+
+// Clean expired entries periodically
+function cleanExpired() {
+  const now = Date.now();
+  for (const [key, entry] of memoryStore.entries()) {
+    if (entry.expires && entry.expires < now) {
+      memoryStore.delete(key);
+    }
+  }
+}
+
+// Memory-based fallback implementations
+const memoryFallback = {
+  async get<T>(key: string): Promise<T | null> {
+    cleanExpired();
+    const entry = memoryStore.get(key);
+    if (!entry) return null;
+    if (entry.expires && entry.expires < Date.now()) {
+      memoryStore.delete(key);
+      return null;
+    }
+    return entry.value as T;
+  },
+  async set(key: string, value: unknown, options?: { ex?: number }): Promise<'OK'> {
+    const expires = options?.ex ? Date.now() + options.ex * 1000 : undefined;
+    memoryStore.set(key, { value, expires });
+    return 'OK';
+  },
+  async del(...keys: string[]): Promise<number> {
+    let count = 0;
+    for (const key of keys) {
+      if (memoryStore.delete(key)) count++;
+    }
+    return count;
+  },
+  async incr(key: string): Promise<number> {
+    const current = (await this.get<number>(key)) || 0;
+    const next = current + 1;
+    await this.set(key, next);
+    return next;
+  },
+  async incrby(key: string, amount: number): Promise<number> {
+    const current = (await this.get<number>(key)) || 0;
+    const next = current + amount;
+    await this.set(key, next);
+    return next;
+  },
+  async incrbyfloat(key: string, amount: number): Promise<number> {
+    return this.incrby(key, amount);
+  },
+  async hget<T>(key: string, field: string): Promise<T | null> {
+    const hash = await this.get<Record<string, unknown>>(key);
+    return (hash?.[field] as T) || null;
+  },
+  async hset(key: string, field: string, value: unknown): Promise<number> {
+    const hash = (await this.get<Record<string, unknown>>(key)) || {};
+    hash[field] = value;
+    await this.set(key, hash);
+    return 1;
+  },
+  async hgetall<T>(key: string): Promise<T | null> {
+    return this.get<T>(key);
+  },
+  async lpush(key: string, ...values: unknown[]): Promise<number> {
+    const list = (await this.get<unknown[]>(key)) || [];
+    list.unshift(...values);
+    await this.set(key, list);
+    return list.length;
+  },
+  async lrange<T>(key: string, start: number, stop: number): Promise<T[]> {
+    const list = (await this.get<T[]>(key)) || [];
+    return list.slice(start, stop === -1 ? undefined : stop + 1);
+  },
+  async ltrim(key: string, start: number, stop: number): Promise<'OK'> {
+    const list = (await this.get<unknown[]>(key)) || [];
+    const trimmed = list.slice(start, stop === -1 ? undefined : stop + 1);
+    await this.set(key, trimmed);
+    return 'OK';
+  },
+  async zadd(key: string, ...args: unknown[]): Promise<number> {
+    return 1; // Simplified
+  },
+  async zrange<T>(key: string, start: number, stop: number): Promise<T[]> {
+    return [];
+  },
+  async zrevrange<T>(key: string, start: number, stop: number): Promise<T[]> {
+    return [];
+  },
+  async expire(key: string, seconds: number): Promise<number> {
+    const entry = memoryStore.get(key);
+    if (entry) {
+      entry.expires = Date.now() + seconds * 1000;
+      return 1;
+    }
+    return 0;
+  },
+  async sadd(key: string, ...members: unknown[]): Promise<number> {
+    const set = (await this.get<unknown[]>(key)) || [];
+    let added = 0;
+    for (const member of members) {
+      if (!set.includes(member)) {
+        set.push(member);
+        added++;
+      }
+    }
+    await this.set(key, set);
+    return added;
+  },
+  async smembers<T>(key: string): Promise<T[]> {
+    return (await this.get<T[]>(key)) || [];
+  },
+  async sismember(key: string, member: unknown): Promise<number> {
+    const set = (await this.get<unknown[]>(key)) || [];
+    return set.includes(member) ? 1 : 0;
+  },
+};
+
+// Create a proxy that uses Redis when available, memory fallback otherwise
+function createRedisProxy() {
+  const methods = [
+    'get', 'set', 'del', 'hget', 'hset', 'hgetall',
+    'lpush', 'lrange', 'ltrim', 'zadd', 'zrange', 'zrevrange',
+    'expire', 'sadd', 'smembers', 'sismember', 'incr', 'incrby', 'incrbyfloat'
+  ] as const;
+  
+  const proxy: Record<string, unknown> = {};
+  
+  for (const method of methods) {
+    Object.defineProperty(proxy, method, {
+      get() {
+        const redisClient = getRedis();
+        if (redisClient) {
+          return (redisClient as unknown as Record<string, Function>)[method].bind(redisClient);
+        }
+        return (memoryFallback as unknown as Record<string, Function>)[method].bind(memoryFallback);
+      }
+    });
+  }
+  
+  return proxy;
+}
+
+export const redis = createRedisProxy() as {
+  get: <T>(key: string) => Promise<T | null>;
+  set: (key: string, value: unknown, options?: { ex?: number }) => Promise<'OK'>;
+  del: (...keys: string[]) => Promise<number>;
+  hget: <T>(key: string, field: string) => Promise<T | null>;
+  hset: (key: string, field: string, value: unknown) => Promise<number>;
+  hgetall: <T>(key: string) => Promise<T | null>;
+  lpush: (key: string, ...values: unknown[]) => Promise<number>;
+  lrange: <T>(key: string, start: number, stop: number) => Promise<T[]>;
+  ltrim: (key: string, start: number, stop: number) => Promise<'OK'>;
+  zadd: (key: string, ...args: unknown[]) => Promise<number>;
+  zrange: <T>(key: string, start: number, stop: number) => Promise<T[]>;
+  zrevrange: <T>(key: string, start: number, stop: number) => Promise<T[]>;
+  expire: (key: string, seconds: number) => Promise<number>;
+  sadd: (key: string, ...members: unknown[]) => Promise<number>;
+  smembers: <T>(key: string) => Promise<T[]>;
+  sismember: (key: string, member: unknown) => Promise<number>;
+  incr: (key: string) => Promise<number>;
+  incrby: (key: string, amount: number) => Promise<number>;
+  incrbyfloat: (key: string, amount: number) => Promise<number>;
 };
 
 // Key patterns for agent state and RL-based tracking
