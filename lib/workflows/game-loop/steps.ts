@@ -65,8 +65,6 @@ Respond with the screen type and a short description of where the player is in r
         },
       ],
       maxOutputTokens: 100,
-      experimental_telemetry: { isEnabled: false },
-      abortSignal: AbortSignal.timeout(30000), // 30 second timeout
     });
     
     console.log(`[workflow:step:analyzeScreenType] Complete`, {
@@ -410,8 +408,6 @@ Analyze the CURRENT screen (the last/most recent image) and provide:
         },
       ],
       maxOutputTokens: 1000,
-      experimental_telemetry: { isEnabled: false },
-      abortSignal: AbortSignal.timeout(60000), // 60 second timeout for main analysis
     });
 
     const duration = Date.now() - startTime;
