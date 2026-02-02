@@ -1,22 +1,25 @@
-import { Redis } from '@upstash/redis';
-
-let redisInstance: Redis | null = null;
+// Redis instance is lazily loaded only when configured
+let redisInstance: unknown = null;
+let redisLoaded = false;
 
 // Check if Redis is configured
 export function isRedisConfigured(): boolean {
   return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 }
 
-export function getRedis(): Redis | null {
+// Lazily load Redis only when actually needed and configured
+async function loadRedis() {
   if (!isRedisConfigured()) {
     return null;
   }
   
-  if (!redisInstance) {
+  if (!redisLoaded) {
+    const { Redis } = await import('@upstash/redis');
     redisInstance = new Redis({
       url: process.env.KV_REST_API_URL!,
       token: process.env.KV_REST_API_TOKEN!,
     });
+    redisLoaded = true;
   }
   return redisInstance;
 }
@@ -151,15 +154,17 @@ function createRedisProxy() {
   const proxy: Record<string, unknown> = {};
   
   for (const method of methods) {
-    Object.defineProperty(proxy, method, {
-      get() {
-        const redisClient = getRedis();
+    proxy[method] = async (...args: unknown[]) => {
+      // Only try to load Redis if configured
+      if (isRedisConfigured()) {
+        const redisClient = await loadRedis();
         if (redisClient) {
-          return (redisClient as unknown as Record<string, Function>)[method].bind(redisClient);
+          return (redisClient as Record<string, Function>)[method](...args);
         }
-        return (memoryFallback as unknown as Record<string, Function>)[method].bind(memoryFallback);
       }
-    });
+      // Fall back to memory implementation
+      return (memoryFallback as Record<string, Function>)[method](...args);
+    };
   }
   
   return proxy;
