@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pokemon AI Showdown - Emulator</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    #game {
+      width: 100%;
+      height: 100%;
+    }
+    /* Hide EmulatorJS overlays and controls */
+    .ejs--bar,
+    .ejs--controls,
+    .ejs--menu,
+    .ejs--volume,
+    .ejs--context-menu,
+    [class*="ejs_menu"],
+    [class*="ejs_context"],
+    [class*="ejs_volume"] {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+
+  <script>
+    // State
+    let config = null;
+    let emulatorInstance = null;
+    let emulatorInitialized = false;
+    let currentAgentId = 'pending';
+
+    // Logging helper
+    const log = (level, msg, data = {}) => {
+      const prefix = `[emulator-iframe:${currentAgentId}]`;
+      const payload = { ...data, timestamp: Date.now() };
+      if (level === 'error') {
+        console.error(`${prefix} ${msg}`, payload);
+      } else if (level === 'warn') {
+        console.warn(`${prefix} ${msg}`, payload);
+      } else {
+        console.log(`${prefix} ${msg}`, payload);
+      }
+    };
+
+    log('info', 'Iframe loaded, waiting for CONFIG message from parent');
+    
+    // Signal to parent that iframe is ready for config
+    window.parent.postMessage({ type: 'IFRAME_READY' }, '*');
+    
+    // Prevent keyboard input from controlling the game (AI only)
+    document.addEventListener('keydown', function(e) {
+      // Allow F12 for dev tools, block all other keys
+      if (e.key !== 'F12') {
+        e.preventDefault();
+        e.stopPropagation();
+        log('info', 'Blocked keyboard input', { key: e.key });
+      }
+    }, true);
+    
+    document.addEventListener('keyup', function(e) {
+      if (e.key !== 'F12') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+    
+    // Prevent context menu
+    document.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      return false;
+    });
+
+    // Listen for CONFIG message from parent
+    window.addEventListener('message', function(event) {
+      const { type } = event.data;
+      
+      if (type === 'CONFIG' && !emulatorInitialized) {
+        config = event.data;
+        currentAgentId = config.agentId || 'default';
+        log('info', 'Received CONFIG from parent', { 
+          romUrl: config.romUrl, 
+          volume: config.volume, 
+          agentId: config.agentId 
+        });
+        initializeEmulator();
+        return;
+      }
+
+      // Handle other messages only after emulator is ready
+      if (!emulatorInstance) {
+        log('warn', 'Received message but emulator not ready', { type });
+        return;
+      }
+      
+      handleCommand(event.data);
+    });
+
+    function initializeEmulator() {
+      if (emulatorInitialized) return;
+      emulatorInitialized = true;
+      
+      log('info', 'Initializing EmulatorJS with config');
+
+      // EmulatorJS Configuration - set globals before loading
+      window.EJS_player = '#game';
+      window.EJS_core = 'gba';
+      window.EJS_gameUrl = config.romUrl;
+      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+      window.EJS_volume = config.muted ? 0 : (config.volume || 0.5);
+      window.EJS_startOnLoaded = true;
+      window.EJS_DEBUG_XX = false;
+      
+      // Configure screenshot capture to use canvas source
+      window.EJS_screenCapture = {
+        photo: {
+          source: 'canvas',
+          format: 'png',
+          upscale: 1
+        }
+      };
+      
+      // Disable keyboard input (AI controls only)
+      window.EJS_disableKeyboard = true;
+      
+      // Disable context menu
+      window.EJS_contextMenu = false;
+    
+    // Hide default UI elements for AI control
+      window.EJS_defaultControls = false;
+      window.EJS_Buttons = {
+        playPause: false,
+        restart: false,
+        mute: false,
+        settings: false,
+        fullscreen: false,
+        saveState: false,
+        loadState: false,
+        screenRecord: false,
+        gamepad: false,
+        cheat: false,
+        volume: false,
+        quickSave: false,
+        quickLoad: false,
+        screenshot: false,
+        cacheManager: false,
+        exitEmulation: false,
+        saveSavFiles: false,
+        loadSavFiles: false,
+      };
+
+      // Store last screenshot for frame capture
+      let lastScreenshot = null;
+      let screenshotPending = false;
+      
+      // Callback when a save state is created (includes screenshot)
+      window.EJS_onSaveState = function(data) {
+        log('info', 'EJS_onSaveState fired', { hasScreenshot: !!data });
+        if (data && data.length > 1) {
+          // data[0] is screenshot, data[1] is save state
+          lastScreenshot = data[0];
+          if (screenshotPending) {
+            screenshotPending = false;
+            sendScreenshotToParent(lastScreenshot, 'saveState');
+          }
+        }
+      };
+      
+      // Callback for save update (also has screenshot)
+      window.EJS_onSaveUpdate = function(data) {
+        log('info', 'EJS_onSaveUpdate fired', { hash: data?.hash });
+        if (data && data.screenshot) {
+          lastScreenshot = data.screenshot;
+          if (screenshotPending) {
+            screenshotPending = false;
+            sendScreenshotToParent(lastScreenshot, 'saveUpdate');
+          }
+        }
+      };
+      
+      // Callback when emulator is ready
+      window.EJS_onGameStart = function() {
+        log('info', 'EJS_onGameStart fired - emulator ready');
+        emulatorInstance = window.EJS_emulator;
+        log('info', 'Sending READY and GAME_STARTED to parent');
+        window.parent.postMessage({ type: 'READY', agentId: currentAgentId }, '*');
+        window.parent.postMessage({ type: 'GAME_STARTED', agentId: currentAgentId }, '*');
+      };
+
+      // Load the EmulatorJS script dynamically
+      const script = document.createElement('script');
+      script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      script.onload = () => log('info', 'EmulatorJS loader script loaded');
+      script.onerror = () => log('error', 'Failed to load EmulatorJS loader script');
+      document.body.appendChild(script);
+    }
+
+    // Error handling
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      log('error', 'Global error caught', { msg, url, lineNo, columnNo, stack: error?.stack });
+      window.parent.postMessage({ type: 'ERROR', message: msg, agentId: currentAgentId }, '*');
+      return false;
+    };
+
+    function handleCommand(data) {
+      const { type, button, action, volume, state, duration } = data;
+      log('info', 'Handling command', { type, button, action });
+      
+      switch (type) {
+        case 'INPUT':
+          handleInput(button, action);
+          break;
+          
+        case 'PRESS_AND_RELEASE':
+          handlePressAndRelease(button, duration || 100);
+          break;
+          
+        case 'CAPTURE_FRAME':
+          captureFrame();
+          break;
+          
+        case 'SAVE_STATE':
+          saveState();
+          break;
+          
+        case 'LOAD_STATE':
+          loadState(state);
+          break;
+          
+        case 'SET_VOLUME':
+          emulatorInstance.setVolume(volume);
+          break;
+          
+        case 'PAUSE':
+          emulatorInstance.pause();
+          break;
+          
+        case 'RESUME':
+          emulatorInstance.play();
+          break;
+          
+        case 'READ_MEMORY':
+          readMemory(data.address, data.length);
+          break;
+      }
+    }
+    
+    // Read memory from emulator (if supported by the core)
+    function readMemory(address, length) {
+      try {
+        log('info', 'Attempting memory read', { address: address.toString(16), length });
+        
+        // EmulatorJS mGBA core exposes memory through gameManager
+        // The exact API depends on the EmulatorJS version and core
+        if (emulatorInstance && emulatorInstance.gameManager) {
+          const gm = emulatorInstance.gameManager;
+          
+          // Try different methods to read memory
+          let memoryData = null;
+          
+          // Method 1: Direct memory access (if available)
+          if (typeof gm.getMemory === 'function') {
+            memoryData = gm.getMemory(address, length);
+          }
+          // Method 2: Module HEAP access (mGBA/Emscripten)
+          else if (gm.Module && gm.Module.HEAPU8) {
+            // mGBA uses memory-mapped addresses that need translation
+            // GBA EWRAM starts at 0x02000000 in GBA space
+            // In emulator memory it may be at a different offset
+            // This is a simplified attempt - actual offset depends on core
+            try {
+              // Try to find the GBA memory in the Emscripten heap
+              const moduleHeap = gm.Module.HEAPU8;
+              // Look for a memory access function
+              if (typeof gm.Module._malloc !== 'undefined') {
+                log('info', 'Emscripten heap available', { heapSize: moduleHeap.length });
+                // Unfortunately direct memory reading requires core-specific knowledge
+                // We'll report that memory access needs core-level support
+              }
+            } catch (e) {
+              log('warn', 'Module heap access failed', { error: e.message });
+            }
+          }
+          
+          if (memoryData) {
+            window.parent.postMessage({
+              type: 'MEMORY_DATA',
+              address,
+              data: Array.from(memoryData),
+              agentId: currentAgentId,
+              timestamp: Date.now(),
+            }, '*');
+          } else {
+            // Report that memory reading is not available
+            window.parent.postMessage({
+              type: 'MEMORY_NOT_AVAILABLE',
+              message: 'Memory reading not supported by this EmulatorJS core. Consider using save state parsing instead.',
+              agentId: currentAgentId,
+            }, '*');
+          }
+        }
+      } catch (error) {
+        log('error', 'Memory read failed', { error: error.message });
+        window.parent.postMessage({
+          type: 'MEMORY_ERROR',
+          message: error.message,
+          agentId: currentAgentId,
+        }, '*');
+      }
+    }
+
+    // Button mapping for EmulatorJS GBA core
+    // Based on EmulatorJS docs: 0=B, 1=Y, 2=SELECT, 3=START, 4=UP, 5=DOWN, 6=LEFT, 7=RIGHT, 8=A, 9=X, 10=L, 11=R
+    const buttonMap = {
+      'B': 0,
+      'Y': 1,
+      'SELECT': 2,
+      'START': 3,
+      'UP': 4,
+      'DOWN': 5,
+      'LEFT': 6,
+      'RIGHT': 7,
+      'A': 8,
+      'X': 9,
+      'L': 10,
+      'R': 11,
+    };
+
+    function handleInput(button, action) {
+      const buttonId = buttonMap[button];
+      if (buttonId === undefined) return;
+      
+      if (action === 'press') {
+        emulatorInstance.gameManager.simulateInput(0, buttonId, 1);
+      } else {
+        emulatorInstance.gameManager.simulateInput(0, buttonId, 0);
+      }
+    }
+
+    function handlePressAndRelease(button, duration) {
+      const buttonId = buttonMap[button];
+      if (buttonId === undefined) {
+        log('error', 'Unknown button', { button });
+        window.parent.postMessage({
+          type: 'BUTTON_ERROR',
+          button,
+          error: 'Unknown button',
+          agentId: currentAgentId,
+        }, '*');
+        return;
+      }
+      
+      log('info', 'Pressing button', { button, buttonId, duration });
+      
+      try {
+        emulatorInstance.gameManager.simulateInput(0, buttonId, 1);
+        setTimeout(() => {
+          emulatorInstance.gameManager.simulateInput(0, buttonId, 0);
+          log('info', 'Button released', { button, buttonId });
+          
+          // Send confirmation back to parent
+          window.parent.postMessage({
+            type: 'BUTTON_PRESSED',
+            button,
+            buttonId,
+            duration,
+            agentId: currentAgentId,
+            timestamp: Date.now(),
+          }, '*');
+        }, duration);
+      } catch (error) {
+        log('error', 'Failed to press button', { button, error: error.message });
+        window.parent.postMessage({
+          type: 'BUTTON_ERROR',
+          button,
+          error: error.message,
+          agentId: currentAgentId,
+        }, '*');
+      }
+    }
+
+    function sendScreenshotToParent(screenshot, method) {
+      if (!screenshot) {
+        log('warn', 'No screenshot to send');
+        return;
+      }
+      
+      // Convert to data URL if it's a blob or buffer
+      let frame = screenshot;
+      if (screenshot instanceof Blob) {
+        const reader = new FileReader();
+        reader.onload = function() {
+          window.parent.postMessage({ 
+            type: 'FRAME_DATA', 
+            frame: reader.result,
+            frameSize: reader.result.length,
+            isBlank: false,
+            method: method,
+            timestamp: Date.now(),
+            agentId: currentAgentId 
+          }, '*');
+        };
+        reader.readAsDataURL(screenshot);
+        return;
+      }
+      
+      // If already a data URL or base64 string
+      if (typeof screenshot === 'string') {
+        frame = screenshot.startsWith('data:') ? screenshot : 'data:image/png;base64,' + screenshot;
+      }
+      
+      log('info', 'Sending screenshot to parent', { method, frameSize: frame.length });
+      window.parent.postMessage({ 
+        type: 'FRAME_DATA', 
+        frame,
+        frameSize: frame.length,
+        isBlank: false,
+        method: method,
+        timestamp: Date.now(),
+        agentId: currentAgentId 
+      }, '*');
+    }
+    
+    async function captureFrame() {
+      try {
+        log('info', 'captureFrame called');
+        
+        // Method 1: Try using the gameManager screenshot method (returns a Promise)
+        if (emulatorInstance && emulatorInstance.gameManager && emulatorInstance.gameManager.screenshot) {
+          log('info', 'Using gameManager.screenshot');
+          try {
+            const screenshot = await emulatorInstance.gameManager.screenshot();
+            if (screenshot) {
+              sendScreenshotToParent(screenshot, 'gameManager');
+              return;
+            }
+          } catch (e) {
+            log('warn', 'gameManager.screenshot failed', { error: e.message });
+          }
+        }
+        
+        // Method 2: Fall back to direct canvas capture
+        log('info', 'Falling back to canvas capture');
+        captureFromCanvas();
+      } catch (error) {
+        log('error', 'Failed to capture frame', { error: error.message });
+        window.parent.postMessage({ 
+          type: 'ERROR', 
+          message: 'Failed to capture frame: ' + error.message,
+          agentId: currentAgentId 
+        }, '*');
+      }
+    }
+    
+    // Upscale factor for higher resolution screenshots (GBA native is 240x160)
+    // 2x = 480x320, 3x = 720x480 (recommended for AI vision models)
+    const UPSCALE_FACTOR = 3;
+    
+    function captureFromCanvas() {
+      try {
+        // Find the canvas - EmulatorJS creates it inside #game
+        const canvas = document.querySelector('#game canvas');
+        if (!canvas) {
+          log('warn', 'No canvas found for frame capture');
+          window.parent.postMessage({ 
+            type: 'FRAME_DATA', 
+            frame: null,
+            error: 'No canvas found',
+            timestamp: Date.now(),
+            agentId: currentAgentId 
+          }, '*');
+          return;
+        }
+        
+        // Create a 2D canvas to copy the WebGL content
+        // This works around preserveDrawingBuffer issues
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Output dimensions with upscaling for better AI vision
+        const outWidth = width * UPSCALE_FACTOR;
+        const outHeight = height * UPSCALE_FACTOR;
+        
+        log('info', 'Capturing from canvas', { width, height, outWidth, outHeight, upscale: UPSCALE_FACTOR });
+        
+        // Get WebGL context and read pixels directly
+        const gl = canvas.getContext('webgl') || canvas.getContext('webgl2') || canvas.getContext('experimental-webgl');
+        
+        if (gl) {
+          // Read pixels from WebGL context
+          const pixels = new Uint8Array(width * height * 4);
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          
+          // Check if we got actual data (not all zeros)
+          let hasData = false;
+          for (let i = 0; i < pixels.length; i += 100) {
+            if (pixels[i] !== 0 || pixels[i+1] !== 0 || pixels[i+2] !== 0) {
+              hasData = true;
+              break;
+            }
+          }
+          
+          if (hasData) {
+            // Create a temp canvas at native resolution first
+            const nativeCanvas = document.createElement('canvas');
+            nativeCanvas.width = width;
+            nativeCanvas.height = height;
+            const nativeCtx = nativeCanvas.getContext('2d');
+            const imageData = nativeCtx.createImageData(width, height);
+            
+            // Flip vertically while copying (WebGL is upside down)
+            for (let y = 0; y < height; y++) {
+              for (let x = 0; x < width; x++) {
+                const srcIdx = ((height - y - 1) * width + x) * 4;
+                const dstIdx = (y * width + x) * 4;
+                imageData.data[dstIdx] = pixels[srcIdx];
+                imageData.data[dstIdx + 1] = pixels[srcIdx + 1];
+                imageData.data[dstIdx + 2] = pixels[srcIdx + 2];
+                imageData.data[dstIdx + 3] = pixels[srcIdx + 3];
+              }
+            }
+            nativeCtx.putImageData(imageData, 0, 0);
+            
+            // Now upscale using nearest-neighbor for crisp pixels
+            const upscaledCanvas = document.createElement('canvas');
+            upscaledCanvas.width = outWidth;
+            upscaledCanvas.height = outHeight;
+            const upscaledCtx = upscaledCanvas.getContext('2d');
+            upscaledCtx.imageSmoothingEnabled = false; // Crisp pixel scaling
+            upscaledCtx.drawImage(nativeCanvas, 0, 0, outWidth, outHeight);
+            
+            const frame = upscaledCanvas.toDataURL('image/png');
+            
+            log('info', 'Frame captured via WebGL readPixels (upscaled)', { 
+              frameSize: frame.length,
+              nativeRes: `${width}x${height}`,
+              upscaledRes: `${outWidth}x${outHeight}`
+            });
+            
+            window.parent.postMessage({ 
+              type: 'FRAME_DATA', 
+              frame,
+              frameSize: frame.length,
+              isBlank: false,
+              method: 'webgl-readPixels-upscaled',
+              resolution: { width: outWidth, height: outHeight },
+              timestamp: Date.now(),
+              agentId: currentAgentId 
+            }, '*');
+            return;
+          }
+        }
+        
+        // Fallback: try toDataURL anyway
+        const frame = canvas.toDataURL('image/png');
+        const isBlank = frame.length < 1000;
+        
+        log('info', 'Frame captured via toDataURL', { frameSize: frame.length, isBlank });
+        
+        window.parent.postMessage({ 
+          type: 'FRAME_DATA', 
+          frame,
+          frameSize: frame.length,
+          isBlank,
+          method: 'toDataURL',
+          timestamp: Date.now(),
+          agentId: currentAgentId 
+        }, '*');
+      } catch (error) {
+        log('error', 'Failed in captureFromCanvas', { error: error.message });
+        window.parent.postMessage({ 
+          type: 'ERROR', 
+          message: 'Failed to capture frame: ' + error.message,
+          agentId: currentAgentId 
+        }, '*');
+      }
+    }
+
+    function saveState() {
+      try {
+        const state = emulatorInstance.gameManager.getState();
+        window.parent.postMessage({ 
+          type: 'STATE_SAVED', 
+          state,
+          agentId: currentAgentId 
+        }, '*');
+      } catch (error) {
+        window.parent.postMessage({ 
+          type: 'ERROR', 
+          message: 'Failed to save state: ' + error.message,
+          agentId: currentAgentId 
+        }, '*');
+      }
+    }
+
+    function loadState(state) {
+      try {
+        emulatorInstance.gameManager.loadState(state);
+        window.parent.postMessage({ 
+          type: 'STATE_LOADED',
+          agentId: currentAgentId 
+        }, '*');
+      } catch (error) {
+        window.parent.postMessage({ 
+          type: 'ERROR', 
+          message: 'Failed to load state: ' + error.message,
+          agentId: currentAgentId 
+        }, '*');
+      }
+    }
+  </script>
+  </body>
+</html>
