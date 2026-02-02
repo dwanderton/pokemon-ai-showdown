@@ -1,9 +1,43 @@
 import { Redis } from '@upstash/redis';
 
-export const redis = new Redis({
-  url: process.env.KV_REST_API_URL!,
-  token: process.env.KV_REST_API_TOKEN!,
-});
+let redisInstance: Redis | null = null;
+
+export function getRedis(): Redis {
+  if (!redisInstance) {
+    const url = process.env.KV_REST_API_URL;
+    const token = process.env.KV_REST_API_TOKEN;
+    
+    if (!url || !token) {
+      throw new Error('Missing Upstash Redis configuration. Please set KV_REST_API_URL and KV_REST_API_TOKEN environment variables.');
+    }
+    
+    redisInstance = new Redis({ url, token });
+  }
+  return redisInstance;
+}
+
+// Legacy export for backwards compatibility - use getRedis() instead
+export const redis = {
+  get get() { return getRedis().get.bind(getRedis()); },
+  get set() { return getRedis().set.bind(getRedis()); },
+  get del() { return getRedis().del.bind(getRedis()); },
+  get hget() { return getRedis().hget.bind(getRedis()); },
+  get hset() { return getRedis().hset.bind(getRedis()); },
+  get hgetall() { return getRedis().hgetall.bind(getRedis()); },
+  get lpush() { return getRedis().lpush.bind(getRedis()); },
+  get lrange() { return getRedis().lrange.bind(getRedis()); },
+  get ltrim() { return getRedis().ltrim.bind(getRedis()); },
+  get zadd() { return getRedis().zadd.bind(getRedis()); },
+  get zrange() { return getRedis().zrange.bind(getRedis()); },
+  get zrevrange() { return getRedis().zrevrange.bind(getRedis()); },
+  get expire() { return getRedis().expire.bind(getRedis()); },
+  get sadd() { return getRedis().sadd.bind(getRedis()); },
+  get smembers() { return getRedis().smembers.bind(getRedis()); },
+  get sismember() { return getRedis().sismember.bind(getRedis()); },
+  get incr() { return getRedis().incr.bind(getRedis()); },
+  get incrby() { return getRedis().incrby.bind(getRedis()); },
+  get incrbyfloat() { return getRedis().incrbyfloat.bind(getRedis()); },
+};
 
 // Key patterns for agent state and RL-based tracking
 export const keys = {
