@@ -1,8 +1,6 @@
-'use cache';
-
 /**
- * Cached game knowledge for Pokemon LeafGreen
- * server-cache-react: Using "use cache" for per-request deduplication
+ * Game knowledge for Pokemon LeafGreen
+ * Static data and utility functions for game state analysis
  * 
  * Includes RL-based reward functions from Pokemon Red RL paper (arxiv:2502.19920)
  */
