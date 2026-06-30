@@ -26,14 +26,24 @@ import { simpleFrameHash, formatCommandHistoryWithChanges, type FrameHistoryEntr
 const ROM_URL = 'https://ziajgo1fa4mooxyp.public.blob.vercel-storage.com/2026/2026-01-22_leaf-green.gba';
 
 const AVAILABLE_MODELS: { id: ModelId; name: string }[] = [
-  { id: 'openai/gpt-4o', name: 'GPT-4o' },
+  { id: 'anthropic/claude-opus-4.8', name: 'Claude Opus 4.8' },
+  { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5' },
+  { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
+  { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+  { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5' },
+  { id: 'openai/gpt-5.5', name: 'GPT-5.5' },
+  { id: 'openai/gpt-5.4', name: 'GPT-5.4' },
+  { id: 'openai/gpt-5.1-instant', name: 'GPT-5.1 Instant' },
+  { id: 'openai/gpt-5', name: 'GPT-5' },
+  { id: 'openai/gpt-5-mini', name: 'GPT-5 mini' },
   { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
-  { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
-  { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4' },
-  { id: 'google/gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+  { id: 'openai/gpt-4o', name: 'GPT-4o' },
+  { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro' },
+  { id: 'google/gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
   { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-  { id: 'xai/grok-3', name: 'Grok 3' },
-  { id: 'xai/grok-3-mini', name: 'Grok 3 Mini' },
+  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+  { id: 'xai/grok-4.3', name: 'Grok 4.3' },
+  { id: 'xai/grok-4.1-fast-reasoning', name: 'Grok 4.1 Fast' },
 ];
 
 // Game loop interval (ms between AI decisions)
@@ -46,7 +56,7 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
-  const [modelId, setModelId] = useState<ModelId>('openai/gpt-4o');
+  const [modelId, setModelId] = useState<ModelId>('anthropic/claude-sonnet-5');
   const [isRunning, setIsRunning] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [agentState, setAgentState] = useState<AgentState>(() => 
@@ -181,15 +191,20 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
       return;
     }
 
-    // Create abort controller for this request
+    // Create abort controller for this request.
+    // The decide endpoint makes TWO sequential model calls (screen-type analysis +
+    // full decision). Reasoning models (gpt-5, Claude with extended thinking) can
+    // take 10-35s each, so a 30s budget aborted mid-flight. 90s comfortably covers
+    // two slow reasoning calls plus overhead.
     abortControllerRef.current = new AbortController();
     const timeoutId = setTimeout(() => {
       abortControllerRef.current?.abort();
-    }, 30000); // 30 second timeout
+    }, 90000); // 90 second timeout
 
     // Set lock
     let resolveLock: () => void;
     processingLockRef.current = new Promise(r => { resolveLock = r; });
+    isProcessingRef.current = true;
     setIsProcessing(true);
 
     setAgentState(prev => ({
@@ -390,14 +405,22 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
           addDebugLog('warn', 'AgentCard', `Button ${btn} pressed 10+ times, banning for 2 prompts`);
         }
         
+        // Guard confidence: if it's ever undefined/null, calling .toFixed() throws,
+        // which would be caught by the outer try/catch and silently abort the rest
+        // of the sequence after the first press. Coerce to a safe number.
+        const conf = typeof step.confidence === 'number' ? step.confidence : 0;
         if (step.button === 'WAIT') {
+          console.log(`[v0] press step ${i + 1}/${buttonSequence.length}: WAIT (no press)`);
           addDebugLog('info', 'AgentCard', `Step ${i + 1}/${buttonSequence.length}: WAIT - no button press`);
         } else if (emulatorRef.current) {
-          addDebugLog('info', 'AgentCard', `Step ${i + 1}/${buttonSequence.length}: Pressing ${step.button} (conf: ${step.confidence.toFixed(2)})`);
+          console.log(`[v0] press step ${i + 1}/${buttonSequence.length}: ${step.button} (conf: ${conf.toFixed(2)})`);
+          addDebugLog('info', 'AgentCard', `Step ${i + 1}/${buttonSequence.length}: Pressing ${step.button} (conf: ${conf.toFixed(2)})`);
           emulatorRef.current.pressButton(step.button as GBAButton);
+        } else {
+          console.warn(`[v0] press step ${i + 1}/${buttonSequence.length}: emulator ref missing, skipping ${step.button}`);
         }
         
-        // Wait 500ms between buttons in sequence (100ms hold + 400ms gap for game to register)
+        // Wait 500ms between buttons in sequence (180ms hold + ~320ms gap for game to register)
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       
@@ -439,6 +462,7 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
       const cooldownMs = lastScreenTypeRef.current === 'dialogue' ? 8000 : 500;
       await new Promise(resolve => setTimeout(resolve, cooldownMs));
       
+      isProcessingRef.current = false;
       setIsProcessing(false);
       processingLockRef.current = null;
       resolveLock!();
@@ -498,7 +522,7 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
       if (!isRunning) return;
 
       // Capture frame and schedule next iteration
-      if (emulatorRef.current && !isProcessing) {
+      if (emulatorRef.current && !isProcessingRef.current) {
         // console.log(`[component:AgentCard:${agentId}] Requesting frame capture...`);
         emulatorRef.current.captureFrame();
       }
@@ -517,10 +541,10 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
         clearTimeout(gameLoopRef.current);
         gameLoopRef.current = null;
       }
-      // Abort any in-flight request
+      // Abort any in-flight request only when the agent is stopped or unmounted
       abortControllerRef.current?.abort();
     };
-  }, [isRunning, isReady, isProcessing]);
+  }, [isRunning, isReady]);
 
   // Process pending frame when available (respects mutex)
   useEffect(() => {
@@ -563,6 +587,7 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
     setCurrentThought('');
     setPendingFrame(null);
     setLastButton(null);
+    isProcessingRef.current = false;
     setIsProcessing(false);
     processingLockRef.current = null;
     // Clear frame history and context

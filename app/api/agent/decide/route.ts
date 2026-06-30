@@ -3,6 +3,11 @@ import { gameLoopIteration, initializeAgentState } from '@/lib/workflows/game-lo
 import type { AgentState, ModelId } from '@/lib/types/agent';
 import { getMemStashForPrompt } from '@/lib/memstash';
 
+// This route makes two sequential model calls (screen-type + decision). Reasoning
+// models can take 30s+ combined, so allow up to 120s before the platform kills the
+// function. (Requires a plan that permits extended function duration in production.)
+export const maxDuration = 120;
+
 // In-memory state store (would be Redis in production)
 const agentStates = new Map<string, AgentState>();
 
