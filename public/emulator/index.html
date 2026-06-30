@@ -28,7 +28,11 @@
     .ejs--context-menu,
     [class*="ejs_menu"],
     [class*="ejs_context"],
-    [class*="ejs_volume"] {
+    [class*="ejs_volume"],
+    /* Touch devices render an on-screen virtual gamepad. This emulator is
+       AI-controlled only, so hide the touch controls on mobile too. */
+    .ejs_virtualGamepad_parent,
+    [class*="ejs_virtualGamepad"] {
       display: none !important;
       visibility: hidden !important;
       pointer-events: none !important;

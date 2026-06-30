@@ -621,22 +621,22 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
       className
     )}>
       {/* Header with model selector and controls */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className={cn('w-3 h-3 rounded-full', personality.color)} />
-          <span className="font-bold">{AVAILABLE_MODELS.find(m => m.id === modelId)?.name || modelId}</span>
-          <Badge variant="secondary" className="text-xs">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={cn('w-3 h-3 rounded-full shrink-0', personality.color)} />
+          <span className="font-bold truncate">{AVAILABLE_MODELS.find(m => m.id === modelId)?.name || modelId}</span>
+          <Badge variant="secondary" className="text-xs shrink-0">
             {isRunning ? (agentState.status === 'thinking' ? 'running' : 'running') : 'stopped'}
           </Badge>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:justify-end">
           <Select
             value={modelId}
             onValueChange={(v) => setModelId(v as ModelId)}
             disabled={isRunning}
           >
-            <SelectTrigger className="w-40 h-8 text-xs">
+            <SelectTrigger className="w-full min-w-0 flex-1 sm:w-40 sm:flex-none h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
