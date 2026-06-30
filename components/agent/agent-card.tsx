@@ -56,7 +56,7 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
-  const [modelId, setModelId] = useState<ModelId>('anthropic/claude-sonnet-5');
+  const [modelId, setModelId] = useState<ModelId>('google/gemini-3-pro-preview');
   const [isRunning, setIsRunning] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [agentState, setAgentState] = useState<AgentState>(() => 
