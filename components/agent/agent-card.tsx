@@ -56,7 +56,7 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
-  const [modelId, setModelId] = useState<ModelId>('openai/gpt-4o');
+  const [modelId, setModelId] = useState<ModelId>('anthropic/claude-sonnet-5');
   const [isRunning, setIsRunning] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [agentState, setAgentState] = useState<AgentState>(() => 
