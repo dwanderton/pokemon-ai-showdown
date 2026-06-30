@@ -1,19 +1,24 @@
 import type { GBAButton } from './emulator';
 
 export type ModelId = 
-  | 'openai/gpt-4o'
-  | 'openai/gpt-4.1'
+  | 'openai/gpt-5.5'
+  | 'openai/gpt-5.4'
+  | 'openai/gpt-5.1-instant'
   | 'openai/gpt-5'
   | 'openai/gpt-5-mini'
-  | 'anthropic/claude-sonnet-4'
-  | 'anthropic/claude-opus-4'
+  | 'openai/gpt-4.1'
+  | 'openai/gpt-4o'
+  | 'anthropic/claude-opus-4.8'
+  | 'anthropic/claude-sonnet-5'
   | 'anthropic/claude-opus-4.5'
   | 'anthropic/claude-sonnet-4.5'
   | 'anthropic/claude-haiku-4.5'
-  | 'google/gemini-2.0-flash'
+  | 'google/gemini-3-pro-preview'
+  | 'google/gemini-3.5-flash'
   | 'google/gemini-2.5-pro'
-  | 'xai/grok-3'
-  | 'xai/grok-3-mini';
+  | 'google/gemini-2.5-flash'
+  | 'xai/grok-4.3'
+  | 'xai/grok-4.1-fast-reasoning';
 
 export interface AgentPersonality {
   name: string;

@@ -151,10 +151,10 @@ import { createInitialGameState, DEFAULT_PROGRESS_METRICS } from '@/lib/types/ag
 // We estimate tokens for fallback because the API call DID happen and consume tokens
 // Even though parsing failed, we still need to track the cost
 // Uses WAIT instead of A to avoid accidentally triggering unwanted actions
-const createFallbackDecision = (estimatedPromptTokens = 1500): GameLoopOutput => ({
+const createFallbackDecision = (estimatedPromptTokens = 1500, reason = 'parsing error'): GameLoopOutput => ({
   decision: {
     button: 'WAIT',
-    reasoning: 'Fallback: waiting due to parsing error - no action taken',
+    reasoning: `Fallback: waiting due to ${reason} - no action taken`,
     confidence: 0.5,
     personality_comment: '',
     confidenceScores: { A: 0.2, B: 0.2, START: 0.1, SELECT: 0.1, UP: 0.2, DOWN: 0.2, LEFT: 0.2, RIGHT: 0.2, L: 0.1, R: 0.1, WAIT: 0.5 },
@@ -530,29 +530,34 @@ return {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorName = error instanceof Error ? error.name : 'Unknown';
-    // console.error(`[workflow:step:analyzeFrameAndDecide] Failed`, { operationId, duration: Date.now() - startTime, errorName, error: errorMessage });
+    console.error(`[v0] [workflow:step:analyzeFrameAndDecide] Failed`, { modelId: input.modelId, errorName, error: errorMessage });
     
-    // Always return fallback decision on any AI error - don't crash the game loop
-    // console.log(`[workflow:step:analyzeFrameAndDecide] Using fallback decision due to error: ${errorName}`);
-    return createFallbackDecision();
+    // Always return fallback decision on any AI error - don't crash the game loop.
+    // Surface the real error in the reasoning so it isn't mislabeled as a parsing error.
+    return createFallbackDecision(1500, `model error (${errorMessage})`);
   }
 }
 
 // Cost calculation based on model pricing (approximate)
 const MODEL_COSTS: Record<ModelId, { input: number; output: number }> = {
-  'openai/gpt-4o': { input: 0.0025, output: 0.01 },
-  'openai/gpt-4.1': { input: 0.002, output: 0.008 },
+  'openai/gpt-5.5': { input: 0.005, output: 0.03 },
+  'openai/gpt-5.4': { input: 0.0025, output: 0.015 },
+  'openai/gpt-5.1-instant': { input: 0.00125, output: 0.01 },
   'openai/gpt-5': { input: 0.00125, output: 0.01 },
   'openai/gpt-5-mini': { input: 0.00025, output: 0.002 },
-  'anthropic/claude-sonnet-4': { input: 0.003, output: 0.015 },
-  'anthropic/claude-opus-4': { input: 0.015, output: 0.075 },
+  'openai/gpt-4.1': { input: 0.002, output: 0.008 },
+  'openai/gpt-4o': { input: 0.0025, output: 0.01 },
+  'anthropic/claude-opus-4.8': { input: 0.005, output: 0.025 },
+  'anthropic/claude-sonnet-5': { input: 0.002, output: 0.01 },
   'anthropic/claude-opus-4.5': { input: 0.005, output: 0.025 },
   'anthropic/claude-sonnet-4.5': { input: 0.003, output: 0.015 },
   'anthropic/claude-haiku-4.5': { input: 0.001, output: 0.005 },
-  'google/gemini-2.0-flash': { input: 0.0001, output: 0.0004 },
-  'google/gemini-2.5-pro': { input: 0.00125, output: 0.005 },
-  'xai/grok-3': { input: 0.003, output: 0.015 },
-  'xai/grok-3-mini': { input: 0.0003, output: 0.0005 },
+  'google/gemini-3-pro-preview': { input: 0.002, output: 0.012 },
+  'google/gemini-3.5-flash': { input: 0.0015, output: 0.009 },
+  'google/gemini-2.5-pro': { input: 0.00125, output: 0.01 },
+  'google/gemini-2.5-flash': { input: 0.0003, output: 0.0025 },
+  'xai/grok-4.3': { input: 0.00125, output: 0.0025 },
+  'xai/grok-4.1-fast-reasoning': { input: 0.0002, output: 0.0005 },
 };
 
 export async function calculateCost(
