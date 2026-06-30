@@ -405,14 +405,22 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
           addDebugLog('warn', 'AgentCard', `Button ${btn} pressed 10+ times, banning for 2 prompts`);
         }
         
+        // Guard confidence: if it's ever undefined/null, calling .toFixed() throws,
+        // which would be caught by the outer try/catch and silently abort the rest
+        // of the sequence after the first press. Coerce to a safe number.
+        const conf = typeof step.confidence === 'number' ? step.confidence : 0;
         if (step.button === 'WAIT') {
+          console.log(`[v0] press step ${i + 1}/${buttonSequence.length}: WAIT (no press)`);
           addDebugLog('info', 'AgentCard', `Step ${i + 1}/${buttonSequence.length}: WAIT - no button press`);
         } else if (emulatorRef.current) {
-          addDebugLog('info', 'AgentCard', `Step ${i + 1}/${buttonSequence.length}: Pressing ${step.button} (conf: ${step.confidence.toFixed(2)})`);
+          console.log(`[v0] press step ${i + 1}/${buttonSequence.length}: ${step.button} (conf: ${conf.toFixed(2)})`);
+          addDebugLog('info', 'AgentCard', `Step ${i + 1}/${buttonSequence.length}: Pressing ${step.button} (conf: ${conf.toFixed(2)})`);
           emulatorRef.current.pressButton(step.button as GBAButton);
+        } else {
+          console.warn(`[v0] press step ${i + 1}/${buttonSequence.length}: emulator ref missing, skipping ${step.button}`);
         }
         
-        // Wait 500ms between buttons in sequence (100ms hold + 400ms gap for game to register)
+        // Wait 500ms between buttons in sequence (180ms hold + ~320ms gap for game to register)
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       

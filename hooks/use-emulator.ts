@@ -193,9 +193,13 @@ export function useEmulator({
     }
   }, [agentId]);
 
-  // Press and release a button (for single inputs)
+  // Press and release a button (for single inputs).
+  // 100ms (~6 frames) was borderline for the game to reliably register each tap,
+  // especially for repeated same-button presses (e.g. mashing A through dialogue).
+  // 180ms (~11 frames) is comfortably above the game's input-poll threshold while
+  // still leaving a clear release gap before the next press in a 500ms-spaced loop.
   const pressButton = useCallback((button: GBAButton) => {
-    sendCommand({ type: 'PRESS_AND_RELEASE', button, duration: 100 });
+    sendCommand({ type: 'PRESS_AND_RELEASE', button, duration: 180 });
   }, [sendCommand]);
 
   // Hold a button down
