@@ -126,13 +126,14 @@
       window.EJS_startOnLoaded = true;
       window.EJS_DEBUG_XX = false;
 
-      // EJS_startOnLoaded is unreliable and frequently leaves a "Play" / start
-      // overlay that requires a manual click. Since this emulator is AI-driven
-      // (and starts muted, so autoplay restrictions don't apply), we auto-click
-      // the start button as soon as it appears so the game boots on its own.
+      // EmulatorJS auto-clicks its own start button when EJS_startOnLoaded is
+      // true, so the game boots without a visible overlay. However, the GBA
+      // core paces its main loop off the Web Audio clock: when the AudioContext
+      // is "suspended" (the default until a user gesture) the core stalls and
+      // the canvas never paints -> the dreaded white screen until you click.
+      // We resume the AudioContext on the first user gesture (see resumeAudio).
       window.EJS_ready = function() {
-        log('info', 'EJS_ready fired - attempting auto-start');
-        autoClickStart();
+        log('info', 'EJS_ready fired');
       };
       
       // Configure screenshot capture to use canvas source
@@ -219,41 +220,49 @@
       document.body.appendChild(script);
     }
 
-    // Poll for the EmulatorJS start/play overlay and click it automatically.
-    // The overlay markup varies between EmulatorJS versions, so we match a few
-    // known selectors. We keep retrying briefly because the button can render
-    // slightly after EJS_ready fires.
-    function autoClickStart() {
-      let attempts = 0;
-      const maxAttempts = 40; // ~10s at 250ms intervals
-      const interval = setInterval(() => {
-        attempts++;
-        const startButton =
-          document.querySelector('.ejs_start_button') ||
-          document.querySelector('[class*="ejs_start"]') ||
-          document.querySelector('.ejs_startbutton');
-
-        if (startButton) {
-          log('info', 'Found start button, auto-clicking', { attempts });
-          startButton.click();
-          clearInterval(interval);
-          return;
-        }
-
-        // If the game canvas already exists, the emulator started without an
-        // overlay and there is nothing to click.
-        if (document.querySelector('#game canvas')) {
-          log('info', 'Canvas present, no start overlay to click', { attempts });
-          clearInterval(interval);
-          return;
-        }
-
-        if (attempts >= maxAttempts) {
-          log('warn', 'Gave up waiting for start button', { attempts });
-          clearInterval(interval);
-        }
-      }, 250);
+    // Resume the emulator's Web Audio context(s). The GBA core's main loop is
+    // gated on the audio clock, so a suspended context leaves the canvas blank
+    // (white). Browsers only allow AudioContext.resume() to take effect when
+    // there is a valid user activation. Because this iframe is same-origin with
+    // the host page, a user gesture in the parent (e.g. clicking "Start")
+    // propagates transient activation here, letting this resume() succeed.
+    // Returns true once every context is running.
+    function resumeAudio() {
+      try {
+        const AL = emulatorInstance && emulatorInstance.Module && emulatorInstance.Module.AL;
+        if (!AL || !AL.contexts) return false;
+        let allRunning = true;
+        Object.values(AL.contexts).forEach((ctx) => {
+          const audioCtx = ctx && ctx.audioCtx;
+          if (!audioCtx) return;
+          if (audioCtx.state === 'suspended') {
+            allRunning = false;
+            audioCtx.resume().catch(() => {});
+          } else if (audioCtx.state !== 'running') {
+            allRunning = false;
+          }
+        });
+        return allRunning;
+      } catch (e) {
+        log('warn', 'resumeAudio failed', { error: e.message });
+        return false;
+      }
     }
+
+    // Fallback: if the user happens to click/tap/press a key directly inside the
+    // emulator iframe, resume audio from that gesture too. Capturing listeners
+    // stay attached until the audio context is confirmed running.
+    function installGestureResume() {
+      const events = ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click'];
+      const handler = () => {
+        if (resumeAudio()) {
+          events.forEach((ev) => window.removeEventListener(ev, handler, true));
+          log('info', 'Audio resumed via in-iframe gesture');
+        }
+      };
+      events.forEach((ev) => window.addEventListener(ev, handler, true));
+    }
+    installGestureResume();
 
     // Error handling
     window.onerror = function(msg, url, lineNo, columnNo, error) {
@@ -301,6 +310,13 @@
           
         case 'READ_MEMORY':
           readMemory(data.address, data.length);
+          break;
+
+        case 'RESUME_AUDIO':
+          // Triggered by a user gesture in the parent page. Same-origin
+          // transient activation lets this resume the suspended AudioContext
+          // so the GBA core's main loop advances and the canvas renders.
+          resumeAudio();
           break;
       }
     }

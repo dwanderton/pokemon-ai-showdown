@@ -183,6 +183,27 @@ export function useEmulator({
     return () => window.removeEventListener('message', handleMessage);
   }, [agentId, config.romUrl, config.volume, handleFrame, handleReady, handleGameStart, handleError, handleMemoryData]);
 
+  // The GBA core paces its main loop off the Web Audio clock. Browsers start the
+  // AudioContext "suspended" until a user gesture, which leaves the emulator
+  // canvas blank (white) even though the game is technically running. Since the
+  // emulator iframe is same-origin, a user gesture in this parent page
+  // propagates transient activation into the iframe, so forwarding a
+  // RESUME_AUDIO message on the first interactions lets the iframe successfully
+  // resume audio and start rendering without the user having to click it.
+  useEffect(() => {
+    const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart'];
+    const handleGesture = () => {
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'RESUME_AUDIO', agentId },
+        '*'
+      );
+    };
+    events.forEach((ev) => window.addEventListener(ev, handleGesture, true));
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, handleGesture, true));
+    };
+  }, [agentId]);
+
   // Send command to iframe
   const sendCommand = useCallback((command: EmulatorCommand) => {
     if (iframeRef.current?.contentWindow) {
