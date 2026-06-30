@@ -64,7 +64,10 @@ Respond with the screen type and a short description of where the player is in r
           ],
         },
       ],
-      maxOutputTokens: 100,
+      // Reasoning models consume output budget on hidden reasoning tokens before
+      // emitting the object, so a tiny limit yields empty responses. 2000 is plenty
+      // for this small output while leaving room for reasoning.
+      maxOutputTokens: 2000,
     });
     
     console.log(`[workflow:step:analyzeScreenType] Complete`, {
@@ -112,37 +115,44 @@ const confidenceScoresSchema = z.object({
 
 // Simplified schema for AI decision - model returns confidence for each button, frontend picks highest
 // Now supports sequences: array of confidence dictionaries for chained inputs
+// NOTE: Use `.nullable()` (required + nullable) instead of `.optional()` so the
+// schema is valid for OpenAI strict structured outputs (every property must be in
+// `required`). Empty/absent values are represented as null and handled in code.
 const decisionSchema = z.object({
   screenAnalysis: z.string(), // Description of what's visible on screen (player, NPCs, objects, exits, etc.)
   reasoning: z.string(),
-  personality_comment: z.string().nullable().optional().default(''), // Optional - can be empty/null to avoid repetition
+  personality_comment: z.string().nullable(), // Can be null to avoid repetition
   // Array of confidence scores - first is required, additional steps executed only if confidence >= 0.85
   buttonSequence: z.array(confidenceScoresSchema).min(1), // No max limit - stop parsing when confidence drops
   progressConfidence: z.number().min(0).max(1), // 0-1: Do you feel your previous actions got you closer to your goals?
   // Structured notes - persistent state the AI maintains
   notes: z.object({
-    currentObjective: z.string().nullable().optional(), // What are you trying to do right now?
-    lastKnownLocation: z.string().nullable().optional(), // Where were you last?
-    exitFound: z.string().nullable().optional(), // Direction of exit if found (e.g., "LEFT wall has door")
-    stuckMode: z.enum(['none', 'perimeter_scan', 'wall_hug', 'backtrack']).nullable().optional(), // Current recovery strategy
-    failedAttempts: z.array(z.string()).max(5).nullable().optional(), // Last 5 failed actions with context
-    importantDiscovery: z.string().nullable().optional(), // Something important to remember
-    general: z.string().nullable().optional(), // Free-form notes for anything else the AI wants to track
-  }).nullable().optional(),
+    currentObjective: z.string().nullable(), // What are you trying to do right now?
+    lastKnownLocation: z.string().nullable(), // Where were you last?
+    exitFound: z.string().nullable(), // Direction of exit if found (e.g., "LEFT wall has door")
+    stuckMode: z.enum(['none', 'perimeter_scan', 'wall_hug', 'backtrack']).nullable(), // Current recovery strategy
+    failedAttempts: z.array(z.string()).max(5).nullable(), // Last 5 failed actions with context
+    importantDiscovery: z.string().nullable(), // Something important to remember
+    general: z.string().nullable(), // Free-form notes for anything else the AI wants to track
+  }).nullable(),
   });
 
-// Simplified game state schema - all optional with defaults
+// Simplified game state schema.
+// NOTE: Fields are `.nullable()` (required + nullable) rather than `.optional()`.
+// OpenAI's strict structured-output mode requires every property to be listed in
+// `required`, so `.optional()`/`.default()` cause the gateway to 500. Defaults are
+// applied in the mapping code below via `?? fallback`.
 const gameStateSchema = z.object({
-  currentArea: z.string().optional().default('Unknown'),
-  inBattle: z.boolean().optional().default(false),
-  inMenu: z.boolean().optional().default(false),
-  inDialogue: z.boolean().optional().default(false),
-  inTextEntry: z.boolean().optional().default(false),
-  pokemonCount: z.number().optional().default(0),
-  badges: z.number().optional().default(0),
-  screenType: z.enum(['overworld', 'battle', 'menu', 'dialogue', 'textEntry', 'transition', 'unknown']).optional().default('unknown'),
+  currentArea: z.string().nullable(),
+  inBattle: z.boolean().nullable(),
+  inMenu: z.boolean().nullable(),
+  inDialogue: z.boolean().nullable(),
+  inTextEntry: z.boolean().nullable(),
+  pokemonCount: z.number().nullable(),
+  badges: z.number().nullable(),
+  screenType: z.enum(['overworld', 'battle', 'menu', 'dialogue', 'textEntry', 'transition', 'unknown']).nullable(),
   // Party health estimate (0-100 percent)
-  estimatedPartyHP: z.number().min(0).max(100).optional().default(100),
+  estimatedPartyHP: z.number().min(0).max(100).nullable(),
 });
 
 import { createInitialGameState, DEFAULT_PROGRESS_METRICS } from '@/lib/types/agent';
@@ -396,9 +406,15 @@ Analyze the CURRENT screen (the last/most recent image) and provide:
 
     const result = await generateObject({
       model: input.modelId,
+      // Flattened schema: a single object whose keys are gameState + decision fields.
+      // A nested { gameState, decision } object is NOT enforced reliably by every
+      // provider — Anthropic models tend to omit the nested `gameState` object,
+      // failing validation. A single flat object is filled completely by all
+      // providers (OpenAI, Anthropic, Google, xAI). We reconstruct the nested
+      // shape below so downstream code is unchanged.
       schema: z.object({
-        gameState: gameStateSchema,
-        decision: decisionSchema,
+        ...gameStateSchema.shape,
+        ...decisionSchema.shape,
       }),
       messages: [
         { role: 'system', content: systemPrompt },
@@ -407,45 +423,71 @@ Analyze the CURRENT screen (the last/most recent image) and provide:
           content: imageContent,
         },
       ],
-      maxOutputTokens: 1000,
+      // Reasoning models (gpt-5, Claude with extended thinking, etc.) spend a large
+      // portion of the output budget on hidden reasoning tokens before emitting the
+      // object. 1000 was far too low and caused empty / truncated responses that
+      // fell back to WAIT. 6000 leaves room for reasoning + the full structured output.
+      maxOutputTokens: 6000,
     });
+
+    // Reconstruct the nested { gameState, decision } shape from the flat result.
+    const o = result.object;
+    const parsedGameState = {
+      currentArea: o.currentArea,
+      inBattle: o.inBattle,
+      inMenu: o.inMenu,
+      inDialogue: o.inDialogue,
+      inTextEntry: o.inTextEntry,
+      pokemonCount: o.pokemonCount,
+      badges: o.badges,
+      screenType: o.screenType,
+      estimatedPartyHP: o.estimatedPartyHP,
+    };
+    const parsedDecision = {
+      screenAnalysis: o.screenAnalysis,
+      reasoning: o.reasoning,
+      personality_comment: o.personality_comment,
+      buttonSequence: o.buttonSequence,
+      progressConfidence: o.progressConfidence,
+      notes: o.notes,
+    };
 
     const duration = Date.now() - startTime;
     
     // Get first button sequence scores for logging
-    const firstStepScores = result.object.decision.buttonSequence?.[0] || {};
+    const firstStepScores = parsedDecision.buttonSequence?.[0] || {};
     console.log(`[workflow:step:analyzeFrameAndDecide] Complete`, {
       operationId,
       duration,
       topConfidenceScores: Object.entries(firstStepScores)
         .sort(([,a], [,b]) => (b as number) - (a as number))
         .slice(0, 3),
-      progressConfidence: result.object.decision.progressConfidence,
+      progressConfidence: parsedDecision.progressConfidence,
       tokensUsed: result.usage?.totalTokens,
     });
 
     // Map simplified schema to full GameState type with RL-based fields
     const gameState: GameState = {
-      currentArea: result.object.gameState.currentArea ?? 'Unknown',
-      inBattle: result.object.gameState.inBattle ?? false,
-      inMenu: result.object.gameState.inMenu ?? false,
-      inDialogue: result.object.gameState.inDialogue ?? false,
-      inTextEntry: result.object.gameState.inTextEntry ?? false,
-      pokemonCount: result.object.gameState.pokemonCount ?? 0,
+      currentArea: parsedGameState.currentArea ?? 'Unknown',
+      inBattle: parsedGameState.inBattle ?? false,
+      inMenu: parsedGameState.inMenu ?? false,
+      inDialogue: parsedGameState.inDialogue ?? false,
+      inTextEntry: parsedGameState.inTextEntry ?? false,
+      pokemonCount: parsedGameState.pokemonCount ?? 0,
       partyHealth: [],
       party: [], // Will be populated if we can read memory
-      totalPartyHP: result.object.gameState.estimatedPartyHP ?? 100,
-      badges: result.object.gameState.badges ?? 0,
+      totalPartyHP: parsedGameState.estimatedPartyHP ?? 100,
+      badges: parsedGameState.badges ?? 0,
       playtime: '0:00',
       currentMilestone: null,
       progressMetrics: { ...DEFAULT_PROGRESS_METRICS, locationsThisEpisode: new Set() },
       lastAction: null,
       lastActionResult: '',
-      screenType: result.object.gameState.screenType ?? 'unknown',
+      screenType: parsedGameState.screenType ?? 'unknown',
     };
 
     // Process button sequence - pick highest confidence button from each step
-    const buttonSequence = result.object.decision.buttonSequence;
+    const buttonSequence = parsedDecision.buttonSequence;
     const SEQUENCE_THRESHOLD = 0.85;
     
     // Validate buttonSequence exists and is an array
@@ -497,25 +539,25 @@ Analyze the CURRENT screen (the last/most recent image) and provide:
     // console.log(`[workflow:step:analyzeFrameAndDecide] Button sequence: ${buttonsToExecute.map(b => `${b.button}(${b.score.toFixed(2)})`).join(' -> ')}`);
 
     // Handle structured notes - merge if model provided new content
-    if (result.object.decision.notes && typeof result.object.decision.notes === 'object') {
-      await appendMemStash(input.agentId, result.object.decision.notes);
+    if (parsedDecision.notes && typeof parsedDecision.notes === 'object') {
+      await appendMemStash(input.agentId, parsedDecision.notes);
     }
     
     // Log decision to persistent decision log
     await appendDecisionLog(input.agentId, {
       button: primaryButton.button,
-      reasoning: result.object.decision.reasoning,
+      reasoning: parsedDecision.reasoning,
     });
 
 return {
   decision: {
   button: primaryButton.button,
-  reasoning: result.object.decision.reasoning,
-  screenAnalysis: result.object.decision.screenAnalysis,
+  reasoning: parsedDecision.reasoning,
+  screenAnalysis: parsedDecision.screenAnalysis,
   confidence: primaryButton.score,
-  personality_comment: result.object.decision.personality_comment,
+  personality_comment: parsedDecision.personality_comment,
   confidenceScores: firstScores, // First step's confidence scores
-  progressConfidence: result.object.decision.progressConfidence,
+  progressConfidence: parsedDecision.progressConfidence,
   buttonSequence: buttonsToExecute.map(b => ({ button: b.button, confidence: b.score })), // Full sequence to execute
   timestamp: Date.now(),
   isFallback: false,

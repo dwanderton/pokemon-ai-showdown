@@ -191,11 +191,15 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
       return;
     }
 
-    // Create abort controller for this request
+    // Create abort controller for this request.
+    // The decide endpoint makes TWO sequential model calls (screen-type analysis +
+    // full decision). Reasoning models (gpt-5, Claude with extended thinking) can
+    // take 10-35s each, so a 30s budget aborted mid-flight. 90s comfortably covers
+    // two slow reasoning calls plus overhead.
     abortControllerRef.current = new AbortController();
     const timeoutId = setTimeout(() => {
       abortControllerRef.current?.abort();
-    }, 30000); // 30 second timeout
+    }, 90000); // 90 second timeout
 
     // Set lock
     let resolveLock: () => void;
