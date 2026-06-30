@@ -164,6 +164,7 @@ import { createInitialGameState, DEFAULT_PROGRESS_METRICS } from '@/lib/types/ag
 const createFallbackDecision = (estimatedPromptTokens = 1500, reason = 'parsing error'): GameLoopOutput => ({
   decision: {
     button: 'WAIT',
+    screenAnalysis: 'Screen analysis unavailable (fallback decision).',
     reasoning: `Fallback: waiting due to ${reason} - no action taken`,
     confidence: 0.5,
     personality_comment: '',
