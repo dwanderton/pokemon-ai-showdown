@@ -125,6 +125,15 @@
       window.EJS_volume = config.muted ? 0 : (config.volume || 0.5);
       window.EJS_startOnLoaded = true;
       window.EJS_DEBUG_XX = false;
+
+      // EJS_startOnLoaded is unreliable and frequently leaves a "Play" / start
+      // overlay that requires a manual click. Since this emulator is AI-driven
+      // (and starts muted, so autoplay restrictions don't apply), we auto-click
+      // the start button as soon as it appears so the game boots on its own.
+      window.EJS_ready = function() {
+        log('info', 'EJS_ready fired - attempting auto-start');
+        autoClickStart();
+      };
       
       // Configure screenshot capture to use canvas source
       window.EJS_screenCapture = {
@@ -208,6 +217,42 @@
       script.onload = () => log('info', 'EmulatorJS loader script loaded');
       script.onerror = () => log('error', 'Failed to load EmulatorJS loader script');
       document.body.appendChild(script);
+    }
+
+    // Poll for the EmulatorJS start/play overlay and click it automatically.
+    // The overlay markup varies between EmulatorJS versions, so we match a few
+    // known selectors. We keep retrying briefly because the button can render
+    // slightly after EJS_ready fires.
+    function autoClickStart() {
+      let attempts = 0;
+      const maxAttempts = 40; // ~10s at 250ms intervals
+      const interval = setInterval(() => {
+        attempts++;
+        const startButton =
+          document.querySelector('.ejs_start_button') ||
+          document.querySelector('[class*="ejs_start"]') ||
+          document.querySelector('.ejs_startbutton');
+
+        if (startButton) {
+          log('info', 'Found start button, auto-clicking', { attempts });
+          startButton.click();
+          clearInterval(interval);
+          return;
+        }
+
+        // If the game canvas already exists, the emulator started without an
+        // overlay and there is nothing to click.
+        if (document.querySelector('#game canvas')) {
+          log('info', 'Canvas present, no start overlay to click', { attempts });
+          clearInterval(interval);
+          return;
+        }
+
+        if (attempts >= maxAttempts) {
+          log('warn', 'Gave up waiting for start button', { attempts });
+          clearInterval(interval);
+        }
+      }, 250);
     }
 
     // Error handling
