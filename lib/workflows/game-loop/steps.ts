@@ -79,10 +79,13 @@ Respond with the screen type and a short description of where the player is in r
     return {
       screenType: result.object.screenType,
       briefDescription: result.object.briefDescription,
+      // AI SDK v6 renamed usage fields: promptTokens -> inputTokens,
+      // completionTokens -> outputTokens. Reading the old names returned undefined,
+      // which is why reported cost was always $0.00.
       usage: {
-        promptTokens: result.usage?.promptTokens ?? 0,
-        completionTokens: result.usage?.completionTokens ?? 0,
-        totalTokens: result.usage?.totalTokens ?? 0,
+        promptTokens: result.usage?.inputTokens ?? 0,
+        completionTokens: result.usage?.outputTokens ?? 0,
+        totalTokens: result.usage?.totalTokens ?? ((result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0)),
       },
     };
   } catch (error) {
@@ -426,9 +429,11 @@ Analyze the CURRENT screen (the last/most recent image) and provide:
       ],
       // Reasoning models (gpt-5, Claude with extended thinking, etc.) spend a large
       // portion of the output budget on hidden reasoning tokens before emitting the
-      // object. 1000 was far too low and caused empty / truncated responses that
-      // fell back to WAIT. 6000 leaves room for reasoning + the full structured output.
-      maxOutputTokens: 6000,
+      // object. A low cap caused empty / truncated responses that fell back to WAIT.
+      // 60000 gives generous headroom for reasoning + the full structured output.
+      // The AI Gateway clamps this down to each model's own max output limit, so a
+      // high value is safe across providers (e.g. gpt-4o is clamped to its limit).
+      maxOutputTokens: 60000,
     });
 
     // Reconstruct the nested { gameState, decision } shape from the flat result.
@@ -564,10 +569,11 @@ return {
   isFallback: false,
   } as AIDecision,
       gameState,
+      // AI SDK v6 usage fields: inputTokens / outputTokens (was promptTokens / completionTokens).
       usage: {
-        promptTokens: result.usage?.promptTokens ?? 0,
-        completionTokens: result.usage?.completionTokens ?? 0,
-        totalTokens: result.usage?.totalTokens ?? 0,
+        promptTokens: result.usage?.inputTokens ?? 0,
+        completionTokens: result.usage?.outputTokens ?? 0,
+        totalTokens: result.usage?.totalTokens ?? ((result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0)),
       },
     };
   } catch (error) {
