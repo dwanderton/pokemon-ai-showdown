@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { redis, keys, HEARTBEAT_TIMEOUT } from '@/lib/redis';
 
+// Heartbeat only touches HTTP-based Upstash Redis, which is Edge-compatible.
+// The Edge runtime has near-zero cold starts, eliminating the multi-second
+// TTFB seen on the Node.js runtime for this hot, frequently-polled endpoint.
+export const runtime = 'edge';
+
 // POST /api/agent/[id]/heartbeat - Update heartbeat
 export async function POST(
   request: NextRequest,
