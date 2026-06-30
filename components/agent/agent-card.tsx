@@ -26,8 +26,13 @@ import { simpleFrameHash, formatCommandHistoryWithChanges, type FrameHistoryEntr
 const ROM_URL = 'https://ziajgo1fa4mooxyp.public.blob.vercel-storage.com/2026/2026-01-22_leaf-green.gba';
 
 const AVAILABLE_MODELS: { id: ModelId; name: string }[] = [
-  { id: 'openai/gpt-4o', name: 'GPT-4o' },
+  { id: 'openai/gpt-5', name: 'GPT-5' },
+  { id: 'openai/gpt-5-mini', name: 'GPT-5 mini' },
   { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+  { id: 'openai/gpt-4o', name: 'GPT-4o' },
+  { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
+  { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+  { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5' },
   { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
   { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4' },
   { id: 'google/gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
@@ -190,6 +195,7 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
     // Set lock
     let resolveLock: () => void;
     processingLockRef.current = new Promise(r => { resolveLock = r; });
+    isProcessingRef.current = true;
     setIsProcessing(true);
 
     setAgentState(prev => ({
@@ -439,6 +445,7 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
       const cooldownMs = lastScreenTypeRef.current === 'dialogue' ? 8000 : 500;
       await new Promise(resolve => setTimeout(resolve, cooldownMs));
       
+      isProcessingRef.current = false;
       setIsProcessing(false);
       processingLockRef.current = null;
       resolveLock!();
@@ -498,7 +505,7 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
       if (!isRunning) return;
 
       // Capture frame and schedule next iteration
-      if (emulatorRef.current && !isProcessing) {
+      if (emulatorRef.current && !isProcessingRef.current) {
         // console.log(`[component:AgentCard:${agentId}] Requesting frame capture...`);
         emulatorRef.current.captureFrame();
       }
@@ -517,10 +524,10 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
         clearTimeout(gameLoopRef.current);
         gameLoopRef.current = null;
       }
-      // Abort any in-flight request
+      // Abort any in-flight request only when the agent is stopped or unmounted
       abortControllerRef.current?.abort();
     };
-  }, [isRunning, isReady, isProcessing]);
+  }, [isRunning, isReady]);
 
   // Process pending frame when available (respects mutex)
   useEffect(() => {
@@ -563,6 +570,7 @@ export function AgentCard({ agentId, className, onDecision }: AgentCardProps) {
     setCurrentThought('');
     setPendingFrame(null);
     setLastButton(null);
+    isProcessingRef.current = false;
     setIsProcessing(false);
     processingLockRef.current = null;
     // Clear frame history and context

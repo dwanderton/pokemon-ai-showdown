@@ -542,8 +542,13 @@ return {
 const MODEL_COSTS: Record<ModelId, { input: number; output: number }> = {
   'openai/gpt-4o': { input: 0.0025, output: 0.01 },
   'openai/gpt-4.1': { input: 0.002, output: 0.008 },
+  'openai/gpt-5': { input: 0.00125, output: 0.01 },
+  'openai/gpt-5-mini': { input: 0.00025, output: 0.002 },
   'anthropic/claude-sonnet-4': { input: 0.003, output: 0.015 },
   'anthropic/claude-opus-4': { input: 0.015, output: 0.075 },
+  'anthropic/claude-opus-4.5': { input: 0.005, output: 0.025 },
+  'anthropic/claude-sonnet-4.5': { input: 0.003, output: 0.015 },
+  'anthropic/claude-haiku-4.5': { input: 0.001, output: 0.005 },
   'google/gemini-2.0-flash': { input: 0.0001, output: 0.0004 },
   'google/gemini-2.5-pro': { input: 0.00125, output: 0.005 },
   'xai/grok-3': { input: 0.003, output: 0.015 },

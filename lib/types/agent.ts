@@ -3,8 +3,13 @@ import type { GBAButton } from './emulator';
 export type ModelId = 
   | 'openai/gpt-4o'
   | 'openai/gpt-4.1'
+  | 'openai/gpt-5'
+  | 'openai/gpt-5-mini'
   | 'anthropic/claude-sonnet-4'
   | 'anthropic/claude-opus-4'
+  | 'anthropic/claude-opus-4.5'
+  | 'anthropic/claude-sonnet-4.5'
+  | 'anthropic/claude-haiku-4.5'
   | 'google/gemini-2.0-flash'
   | 'google/gemini-2.5-pro'
   | 'xai/grok-3'
