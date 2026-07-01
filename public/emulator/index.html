@@ -268,6 +268,25 @@
     }
     installGestureResume();
 
+    // When the AudioContext is suspended (common on mobile), EmulatorJS shows a
+    // resume popup whose <h4> title is built from an empty string. That renders
+    // as the literal text "undefined". Watch for it and replace the title with a
+    // friendly "Click to start" label instead.
+    function installPopupTitleFix() {
+      const fixTitles = () => {
+        document.querySelectorAll('.ejs_popup_container h4').forEach((title) => {
+          const text = (title.textContent || '').trim();
+          if (text === '' || text.toLowerCase() === 'undefined') {
+            title.textContent = 'Click to start';
+          }
+        });
+      };
+      const observer = new MutationObserver(fixTitles);
+      observer.observe(document.body, { childList: true, subtree: true });
+      fixTitles();
+    }
+    installPopupTitleFix();
+
     // Error handling
     window.onerror = function(msg, url, lineNo, columnNo, error) {
       log('error', 'Global error caught', { msg, url, lineNo, columnNo, stack: error?.stack });
