@@ -41,7 +41,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@upstash/redis": "^1.36.1",
     "@upstash/workflow": "^0.2.18",
-    "@vercel/analytics": "^1.6.1",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "^1.1.1",
     "ai": "^6.0.0",
     "class-variance-authority": "^0.7.1",
