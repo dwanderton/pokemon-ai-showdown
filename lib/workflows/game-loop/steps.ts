@@ -591,7 +591,7 @@ return {
 const MODEL_COSTS: Record<ModelId, { input: number; output: number }> = {
   'openai/gpt-5.5': { input: 0.005, output: 0.03 },
   'openai/gpt-5.4': { input: 0.0025, output: 0.015 },
-  'openai/gpt-5.1-instant': { input: 0.00125, output: 0.01 },
+  'openai/gpt-5.1-thinking': { input: 0.00125, output: 0.01 },
   'openai/gpt-5': { input: 0.00125, output: 0.01 },
   'openai/gpt-5-mini': { input: 0.00025, output: 0.002 },
   'openai/gpt-4.1': { input: 0.002, output: 0.008 },
@@ -601,12 +601,12 @@ const MODEL_COSTS: Record<ModelId, { input: number; output: number }> = {
   'anthropic/claude-opus-4.5': { input: 0.005, output: 0.025 },
   'anthropic/claude-sonnet-4.5': { input: 0.003, output: 0.015 },
   'anthropic/claude-haiku-4.5': { input: 0.001, output: 0.005 },
-  'google/gemini-3-pro-preview': { input: 0.002, output: 0.012 },
+  'google/gemini-3.1-pro-preview': { input: 0.002, output: 0.012 },
   'google/gemini-3.5-flash': { input: 0.0015, output: 0.009 },
   'google/gemini-2.5-pro': { input: 0.00125, output: 0.01 },
   'google/gemini-2.5-flash': { input: 0.0003, output: 0.0025 },
-  'xai/grok-4.3': { input: 0.00125, output: 0.0025 },
-  'xai/grok-4.1-fast-reasoning': { input: 0.0002, output: 0.0005 },
+  'spacexai/grok-4.3': { input: 0.00125, output: 0.0025 },
+  'spacexai/grok-4.7': { input: 0.002, output: 0.006 },
 };
 
 export async function calculateCost(

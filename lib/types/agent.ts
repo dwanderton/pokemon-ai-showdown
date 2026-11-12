@@ -3,7 +3,7 @@ import type { GBAButton } from './emulator';
 export type ModelId = 
   | 'openai/gpt-5.5'
   | 'openai/gpt-5.4'
-  | 'openai/gpt-5.1-instant'
+  | 'openai/gpt-5.1-thinking'
   | 'openai/gpt-5'
   | 'openai/gpt-5-mini'
   | 'openai/gpt-4.1'
@@ -13,12 +13,12 @@ export type ModelId =
   | 'anthropic/claude-opus-4.5'
   | 'anthropic/claude-sonnet-4.5'
   | 'anthropic/claude-haiku-4.5'
-  | 'google/gemini-3-pro-preview'
+  | 'google/gemini-3.1-pro-preview'
   | 'google/gemini-3.5-flash'
   | 'google/gemini-2.5-pro'
   | 'google/gemini-2.5-flash'
-  | 'xai/grok-4.3'
-  | 'xai/grok-4.1-fast-reasoning';
+  | 'spacexai/grok-4.3'
+  | 'spacexai/grok-4.7';
 
 export interface AgentPersonality {
   name: string;
